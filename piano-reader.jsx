@@ -25,6 +25,28 @@ const ACCIDENTAL_DISPLAY = {
   "A#": { accidental: "♭", staffNote: "B", displayName: "B♭" },
 };
 
+// ─── Circle of Fifths & Key Signatures ───────────────────────
+// Each key: name, sharps (positive) or flats (negative), sharp/flat note names
+const KEY_SIGNATURES = [
+  { name: "C",  display: "C",   accidentals: 0,  type: null,    notes: [] },
+  { name: "G",  display: "G",   accidentals: 1,  type: "sharp", notes: ["F♯"] },
+  { name: "D",  display: "D",   accidentals: 2,  type: "sharp", notes: ["F♯","C♯"] },
+  { name: "A",  display: "A",   accidentals: 3,  type: "sharp", notes: ["F♯","C♯","G♯"] },
+  { name: "E",  display: "E",   accidentals: 4,  type: "sharp", notes: ["F♯","C♯","G♯","D♯"] },
+  { name: "B",  display: "B",   accidentals: 5,  type: "sharp", notes: ["F♯","C♯","G♯","D♯","A♯"] },
+  { name: "F#", display: "F♯",  accidentals: 6,  type: "sharp", notes: ["F♯","C♯","G♯","D♯","A♯","E♯"] },
+  { name: "Cb", display: "C♭",  accidentals: 7,  type: "flat",  notes: ["B♭","E♭","A♭","D♭","G♭","C♭","F♭"] },
+  { name: "Gb", display: "G♭",  accidentals: 6,  type: "flat",  notes: ["B♭","E♭","A♭","D♭","G♭","C♭"] },
+  { name: "Db", display: "D♭",  accidentals: 5,  type: "flat",  notes: ["B♭","E♭","A♭","D♭","G♭"] },
+  { name: "Ab", display: "A♭",  accidentals: 4,  type: "flat",  notes: ["B♭","E♭","A♭","D♭"] },
+  { name: "Eb", display: "E♭",  accidentals: 3,  type: "flat",  notes: ["B♭","E♭","A♭"] },
+  { name: "Bb", display: "B♭",  accidentals: 2,  type: "flat",  notes: ["B♭","E♭"] },
+  { name: "F",  display: "F",   accidentals: 1,  type: "flat",  notes: ["B♭"] },
+];
+
+// Circle of fifths order (clockwise): C G D A E B F#/Gb Db Ab Eb Bb F
+const CIRCLE_ORDER = ["C","G","D","A","E","B","F#","Db","Ab","Eb","Bb","F"];
+
 // ─── Intervals ────────────────────────────────────────────────
 const INTERVALS = [
   { semitones: 0, name: "Unison", short: "P1", color: "#888" },
@@ -770,10 +792,521 @@ function IntervalMode() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// MODE 3: CIRCLE OF FIFTHS QUIZ
+// ═══════════════════════════════════════════════════════════════
+function CircleOfFifthsMode() {
+  // Quiz types:
+  // "neighbor" – which key comes after X (clockwise)?
+  // "position" – which position (1..12) does key X sit at?
+  // "key-at"   – which key is at position N?
+  const QUIZ_TYPES = [
+    { key: "neighbor", label: "next key →" },
+    { key: "position", label: "position #" },
+    { key: "key-at",   label: "key at #" },
+  ];
+  const [quizType, setQuizType] = useState("neighbor");
+  const [question, setQuestion] = useState(null);
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [wasCorrect, setWasCorrect] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const [correct, setCorrect] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [bestStreak, setBestStreak] = useState(0);
+  const timerRef = useRef(null);
+
+  // Display name helper for circle keys
+  const dispKey = (k) => {
+    const found = KEY_SIGNATURES.find((ks) => ks.name === k);
+    return found ? found.display : k;
+  };
+
+  const generateQuestion = useCallback((type) => {
+    if (type === "neighbor") {
+      const idx = Math.floor(Math.random() * 12);
+      const key = CIRCLE_ORDER[idx];
+      const nextIdx = (idx + 1) % 12;
+      const correct = CIRCLE_ORDER[nextIdx];
+      // Distractors: neighboring positions + random
+      const opts = new Set([correct]);
+      [-2, -1, 2, 3].forEach((d) => opts.add(CIRCLE_ORDER[((idx + d) + 12) % 12]));
+      while (opts.size < 4) opts.add(CIRCLE_ORDER[Math.floor(Math.random() * 12)]);
+      const options = [...opts].sort(() => Math.random() - 0.5).slice(0, 4);
+      if (!options.includes(correct)) options[0] = correct;
+      return {
+        type,
+        text: `Which key follows ${dispKey(key)} in the circle of fifths (clockwise)?`,
+        answer: correct,
+        options: options.sort(() => Math.random() - 0.5),
+        displayAnswer: dispKey(correct),
+      };
+    }
+    if (type === "position") {
+      const idx = Math.floor(Math.random() * 12);
+      const key = CIRCLE_ORDER[idx];
+      const answerPos = idx + 1;
+      const opts = new Set([answerPos]);
+      while (opts.size < 4) opts.add(Math.floor(Math.random() * 12) + 1);
+      return {
+        type,
+        text: `At which position (1 = C) in the circle of fifths is ${dispKey(key)}?`,
+        answer: answerPos,
+        options: [...opts].sort((a, b) => a - b),
+        displayAnswer: String(answerPos),
+      };
+    }
+    // key-at
+    const idx = Math.floor(Math.random() * 12);
+    const answerKey = CIRCLE_ORDER[idx];
+    const opts = new Set([answerKey]);
+    while (opts.size < 4) opts.add(CIRCLE_ORDER[Math.floor(Math.random() * 12)]);
+    return {
+      type,
+      text: `Which key is at position ${idx + 1} in the circle of fifths (1 = C, clockwise)?`,
+      answer: answerKey,
+      options: [...opts].sort(() => Math.random() - 0.5),
+      displayAnswer: dispKey(answerKey),
+    };
+  }, []);
+
+  const newRound = useCallback((type) => {
+    const q = generateQuestion(type || quizType);
+    setQuestion(q);
+    setShowAnswer(false);
+    setWasCorrect(false);
+    setFeedback(null);
+  }, [generateQuestion, quizType]);
+
+  useEffect(() => {
+    newRound(quizType);
+  }, [quizType]);
+
+  const handleGuess = (option) => {
+    if (showAnswer || !question) return;
+    const isRight = String(option) === String(question.answer);
+    setShowAnswer(true);
+    setWasCorrect(isRight);
+    setTotal((t) => t + 1);
+    if (isRight) {
+      setCorrect((c) => c + 1);
+      setStreak((s) => { const ns = s + 1; setBestStreak((b) => Math.max(b, ns)); return ns; });
+      setFeedback(pickRandom(["Correct!", "Nice!", "Yes!", "♩", "Perfect!"]));
+    } else {
+      setStreak(0);
+      setFeedback(`Nope — ${question.displayAnswer}`);
+    }
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => newRound(), isRight ? 900 : 2400);
+  };
+
+  // Small circle of fifths visual
+  const CX = 130, CY = 130, R = 95, r_inner = 55;
+  const circleNodes = CIRCLE_ORDER.map((k, i) => {
+    const angle = (i / 12) * 2 * Math.PI - Math.PI / 2;
+    return { key: k, x: CX + R * Math.cos(angle), y: CY + R * Math.sin(angle) };
+  });
+
+  const highlightKey = showAnswer ? question?.answer : null;
+
+  return (
+    <>
+      {/* Quiz type selector */}
+      <div style={{ display: "flex", gap: 5, marginBottom: 12, flexWrap: "wrap", justifyContent: "center" }}>
+        {QUIZ_TYPES.map((qt) => (
+          <button key={qt.key} onClick={() => setQuizType(qt.key)}
+            style={{
+              background: quizType === qt.key ? "#389be8" : "rgba(255,255,255,0.04)",
+              color: quizType === qt.key ? "#12101e" : "#6b6280",
+              border: "none", borderRadius: 20, padding: "5px 14px",
+              fontSize: 11, fontWeight: 600, cursor: "pointer",
+              fontFamily: "'DM Mono',monospace", transition: "all 0.2s",
+            }}>{qt.label}</button>
+        ))}
+      </div>
+
+      {/* Circle visual */}
+      <div style={{
+        background: "rgba(255,255,255,0.025)", borderRadius: 16,
+        border: "1px solid rgba(255,255,255,0.06)",
+        padding: "12px", marginBottom: 10, width: "100%", maxWidth: 300,
+        display: "flex", justifyContent: "center",
+      }}>
+        <svg viewBox="0 0 260 260" style={{ width: 260, height: 260 }}>
+          {/* Spokes */}
+          {circleNodes.map((n, i) => (
+            <line key={i} x1={CX} y1={CY} x2={n.x} y2={n.y}
+              stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
+          ))}
+          {/* Circle ring */}
+          <circle cx={CX} cy={CY} r={R} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={1} />
+          <circle cx={CX} cy={CY} r={r_inner} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={1} />
+          {/* Position numbers inner */}
+          {circleNodes.map((n, i) => {
+            const angle = (i / 12) * 2 * Math.PI - Math.PI / 2;
+            const ix = CX + r_inner * Math.cos(angle);
+            const iy = CY + r_inner * Math.sin(angle);
+            return (
+              <text key={`pos${i}`} x={ix} y={iy + 4} textAnchor="middle"
+                fontSize={9} fill="rgba(255,255,255,0.2)"
+                fontFamily="'DM Mono',monospace">{i + 1}</text>
+            );
+          })}
+          {/* Key nodes */}
+          {circleNodes.map((n, i) => {
+            const isHighlight = highlightKey && String(n.key) === String(highlightKey);
+            return (
+              <g key={n.key}>
+                <circle cx={n.x} cy={n.y} r={16}
+                  fill={isHighlight
+                    ? (wasCorrect ? "rgba(46,204,113,0.35)" : "rgba(231,76,60,0.35)")
+                    : "rgba(30,28,50,0.9)"}
+                  stroke={isHighlight
+                    ? (wasCorrect ? "#2ecc71" : "#e74c3c")
+                    : "rgba(255,255,255,0.12)"}
+                  strokeWidth={isHighlight ? 2 : 1}
+                />
+                <text x={n.x} y={n.y + 5} textAnchor="middle"
+                  fontSize={11} fontWeight={isHighlight ? 700 : 400}
+                  fill={isHighlight ? (wasCorrect ? "#2ecc71" : "#e74c3c") : "#c8c0dc"}
+                  fontFamily="'DM Mono',monospace">
+                  {dispKey(n.key)}
+                </text>
+              </g>
+            );
+          })}
+          {/* Center label */}
+          <text x={CX} y={CY + 5} textAnchor="middle" fontSize={10}
+            fill="rgba(255,255,255,0.15)" fontFamily="'DM Mono',monospace">5ths</text>
+        </svg>
+      </div>
+
+      {/* Question */}
+      <div style={{
+        background: "rgba(255,255,255,0.03)", borderRadius: 12,
+        border: "1px solid rgba(255,255,255,0.07)",
+        padding: "14px 18px", marginBottom: 10, maxWidth: 440, width: "100%",
+        textAlign: "center",
+      }}>
+        <p style={{
+          color: "#c8c0dc", fontSize: 14, fontFamily: "'DM Mono',monospace",
+          margin: 0, lineHeight: 1.6,
+        }}>{question?.text}</p>
+      </div>
+
+      {/* Feedback */}
+      <div style={{
+        fontSize: 14, fontWeight: 600, height: 22, marginBottom: 6,
+        color: wasCorrect ? "#2ecc71" : "#e74c3c",
+        opacity: feedback ? 1 : 0, transition: "opacity 0.15s",
+        fontFamily: "'DM Mono',monospace",
+      }}>{feedback}</div>
+
+      <Stats correct={correct} total={total} streak={streak} bestStreak={bestStreak} />
+
+      {/* Answer buttons */}
+      <div style={{
+        display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center",
+        width: "100%", maxWidth: 420, marginTop: 6,
+      }}>
+        {question?.options.map((opt) => {
+          const isAnswer = showAnswer && String(opt) === String(question.answer);
+          const label = question.type === "position" ? `#${opt}` : dispKey(opt);
+          return (
+            <button key={String(opt)} onClick={() => handleGuess(opt)}
+              style={{
+                background: isAnswer
+                  ? (wasCorrect ? "rgba(46,204,113,0.2)" : "rgba(231,76,60,0.2)")
+                  : "rgba(255,255,255,0.04)",
+                color: isAnswer ? (wasCorrect ? "#2ecc71" : "#e74c3c") : "#c8c0dc",
+                border: `1px solid ${isAnswer
+                  ? (wasCorrect ? "rgba(46,204,113,0.4)" : "rgba(231,76,60,0.4)")
+                  : "rgba(255,255,255,0.08)"}`,
+                borderRadius: 12, padding: "12px 20px", minWidth: 80,
+                fontSize: 14, fontWeight: 600, cursor: showAnswer ? "default" : "pointer",
+                fontFamily: "'DM Mono',monospace", transition: "all 0.15s",
+                opacity: showAnswer && !isAnswer ? 0.4 : 1,
+              }}>{label}</button>
+          );
+        })}
+      </div>
+
+      <button onClick={() => { clearTimeout(timerRef.current); newRound(); }}
+        style={{
+          marginTop: 14, background: "none", border: "1px solid rgba(255,255,255,0.08)",
+          color: "#5e567a", borderRadius: 20, padding: "5px 22px",
+          fontSize: 11, cursor: "pointer", fontFamily: "'DM Mono',monospace",
+        }}>skip →</button>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MODE 4: KEY SIGNATURE (VORZEICHEN) TRAINING
+// ═══════════════════════════════════════════════════════════════
+function KeySignatureMode() {
+  // Quiz direction: "key-to-acc" (given key → how many & which) or "acc-to-key" (given acc → which key?)
+  const [direction, setDirection] = useState("key-to-acc");
+  const [question, setQuestion] = useState(null);
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [wasCorrect, setWasCorrect] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const [correct, setCorrect] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [bestStreak, setBestStreak] = useState(0);
+  const timerRef = useRef(null);
+
+  const generateQuestion = useCallback((dir) => {
+    const key = pickRandom(KEY_SIGNATURES);
+
+    if (dir === "key-to-acc") {
+      // Given the key name, choose the correct number & type of accidentals
+      const answerText = key.accidentals === 0
+        ? "0 (keine)"
+        : `${key.accidentals} ${key.type === "sharp" ? "♯" : "♭"}`;
+      // Build distractors: vary count and/or type
+      const opts = new Set([answerText]);
+      KEY_SIGNATURES.forEach((ks) => {
+        const t = ks.accidentals === 0
+          ? "0 (keine)"
+          : `${ks.accidentals} ${ks.type === "sharp" ? "♯" : "♭"}`;
+        opts.add(t);
+      });
+      const allOpts = [...opts];
+      const distractors = allOpts.filter((o) => o !== answerText).sort(() => Math.random() - 0.5).slice(0, 3);
+      const options = [...distractors, answerText].sort(() => Math.random() - 0.5);
+      return {
+        dir,
+        text: `Wie viele Vorzeichen hat ${key.display}-Dur?`,
+        subtext: null,
+        answer: answerText,
+        options,
+        key,
+        detailAnswer: key.accidentals === 0 ? "Keine Vorzeichen" : key.notes.join("  "),
+      };
+    }
+
+    // acc-to-key: given count + type, find the key
+    const accText = key.accidentals === 0
+      ? "keine Vorzeichen"
+      : `${key.accidentals} ${key.type === "sharp" ? "Kreuz (♯)" : "Be (♭)"}`;
+    // Pick 3 distractor keys with different accidental count or type
+    const distractors = KEY_SIGNATURES
+      .filter((ks) => !(ks.accidentals === key.accidentals && ks.type === key.type))
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 3);
+    const options = [...distractors, key].sort(() => Math.random() - 0.5);
+    return {
+      dir,
+      text: `Welche Dur-Tonart hat ${accText}?`,
+      subtext: key.accidentals > 0 ? `Vorzeichen: ${key.notes.join(" ")}` : null,
+      answer: key.name,
+      options: options.map((o) => o.name),
+      key,
+      displayOptions: options.map((o) => o.display),
+      detailAnswer: key.display,
+    };
+  }, []);
+
+  const newRound = useCallback((dir) => {
+    const q = generateQuestion(dir || direction);
+    setQuestion(q);
+    setShowAnswer(false);
+    setWasCorrect(false);
+    setFeedback(null);
+  }, [generateQuestion, direction]);
+
+  useEffect(() => {
+    newRound(direction);
+  }, [direction]);
+
+  const handleGuess = (opt) => {
+    if (showAnswer || !question) return;
+    const isRight = String(opt) === String(question.answer);
+    setShowAnswer(true);
+    setWasCorrect(isRight);
+    setTotal((t) => t + 1);
+    if (isRight) {
+      setCorrect((c) => c + 1);
+      setStreak((s) => { const ns = s + 1; setBestStreak((b) => Math.max(b, ns)); return ns; });
+      setFeedback(pickRandom(["Richtig!", "Genau!", "Yes!", "♩", "Super!"]));
+    } else {
+      setStreak(0);
+      setFeedback(`Falsch — ${question.detailAnswer}`);
+    }
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => newRound(), isRight ? 900 : 2400);
+  };
+
+  // Key signature SVG: show sharps or flats on staff lines
+  function KeySigStaff({ ks }) {
+    if (!ks) return null;
+    const staffTop = 20, gap = 12;
+    const accW = 16;
+    // Sharp positions on treble staff (relative to staff bottom = position 0): F C G D A E B
+    const sharpPositions = [8, 5, 9, 6, 3, 7, 4]; // staff position (0=bottom E4)
+    const flatPositions  = [4, 7, 3, 6, 2, 5, 1];
+    const acc = ks.accidentals;
+    const type = ks.type;
+    const positions = type === "sharp" ? sharpPositions.slice(0, acc) : flatPositions.slice(0, acc);
+    const bottomY = staffTop + 4 * gap;
+
+    return (
+      <svg viewBox="0 0 200 85" style={{ width: 200, height: 85 }}>
+        {[0,1,2,3,4].map((i) => (
+          <line key={i} x1={20} x2={185} y1={staffTop + i * gap} y2={staffTop + i * gap}
+            stroke="#5e567a" strokeWidth={1.1} />
+        ))}
+        {/* Treble clef */}
+        <text x={24} y={staffTop + 4.05 * gap} fontSize={44}
+          fill="#a89ec4" fontFamily="'Noto Music','Segoe UI Symbol',serif">𝄞</text>
+        {/* Accidentals */}
+        {positions.map((pos, i) => {
+          const y = bottomY - pos * (gap / 2);
+          const x = 62 + i * accW;
+          return (
+            <text key={i} x={x} y={y + 5} fontSize={13}
+              fill="#e8e0d4" fontFamily="serif" textAnchor="middle">
+              {type === "sharp" ? "♯" : "♭"}
+            </text>
+          );
+        })}
+        {acc === 0 && (
+          <text x={68} y={staffTop + 2.5 * gap} fontSize={11}
+            fill="rgba(200,190,220,0.35)" fontFamily="'DM Mono',monospace">
+            (keine)
+          </text>
+        )}
+      </svg>
+    );
+  }
+
+  return (
+    <>
+      {/* Direction selector */}
+      <div style={{ display: "flex", gap: 5, marginBottom: 12, flexWrap: "wrap", justifyContent: "center" }}>
+        {[
+          { key: "key-to-acc", label: "Tonart → Vorzeichen" },
+          { key: "acc-to-key", label: "Vorzeichen → Tonart" },
+        ].map((d) => (
+          <button key={d.key} onClick={() => setDirection(d.key)}
+            style={{
+              background: direction === d.key ? "#2ecc71" : "rgba(255,255,255,0.04)",
+              color: direction === d.key ? "#12101e" : "#6b6280",
+              border: "none", borderRadius: 20, padding: "5px 14px",
+              fontSize: 11, fontWeight: 600, cursor: "pointer",
+              fontFamily: "'DM Mono',monospace", transition: "all 0.2s",
+            }}>{d.label}</button>
+        ))}
+      </div>
+
+      {/* Staff showing the key signature (only for acc-to-key) */}
+      {direction === "acc-to-key" && question && (
+        <div style={{
+          background: "rgba(255,255,255,0.025)", borderRadius: 14,
+          border: "1px solid rgba(255,255,255,0.06)",
+          padding: "8px 20px", marginBottom: 8, display: "flex", flexDirection: "column",
+          alignItems: "center",
+        }}>
+          <KeySigStaff ks={question.key} />
+          {question.subtext && (
+            <p style={{ color: "#7a7490", fontSize: 11, fontFamily: "'DM Mono',monospace", margin: "4px 0 0" }}>
+              {question.subtext}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Question text */}
+      <div style={{
+        background: "rgba(255,255,255,0.03)", borderRadius: 12,
+        border: "1px solid rgba(255,255,255,0.07)",
+        padding: "14px 18px", marginBottom: 10, maxWidth: 440, width: "100%",
+        textAlign: "center",
+      }}>
+        <p style={{
+          color: "#c8c0dc", fontSize: 14, fontFamily: "'DM Mono',monospace",
+          margin: 0, lineHeight: 1.6,
+        }}>{question?.text}</p>
+      </div>
+
+      {/* Reveal detail after answer */}
+      {showAnswer && question && (
+        <div style={{
+          fontSize: 12, color: wasCorrect ? "#2ecc71" : "#e74c3c",
+          fontFamily: "'DM Mono',monospace", marginBottom: 4,
+          textAlign: "center", maxWidth: 400,
+        }}>
+          {question.dir === "key-to-acc" && !wasCorrect
+            ? `${question.key.display}: ${question.detailAnswer}`
+            : question.dir === "key-to-acc" && wasCorrect
+              ? (question.key.accidentals > 0 ? `(${question.key.notes.join("  ")})` : "")
+              : ""}
+        </div>
+      )}
+
+      {/* Feedback */}
+      <div style={{
+        fontSize: 14, fontWeight: 600, height: 22, marginBottom: 6,
+        color: wasCorrect ? "#2ecc71" : "#e74c3c",
+        opacity: feedback ? 1 : 0, transition: "opacity 0.15s",
+        fontFamily: "'DM Mono',monospace",
+      }}>{feedback}</div>
+
+      <Stats correct={correct} total={total} streak={streak} bestStreak={bestStreak} />
+
+      {/* Answer buttons */}
+      <div style={{
+        display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center",
+        width: "100%", maxWidth: 480, marginTop: 6,
+      }}>
+        {question?.options.map((opt, idx) => {
+          const isAnswer = showAnswer && String(opt) === String(question.answer);
+          const label = question.dir === "acc-to-key"
+            ? (question.displayOptions?.[question.options.indexOf(opt)] ?? opt)
+            : opt;
+          return (
+            <button key={String(opt)} onClick={() => handleGuess(opt)}
+              style={{
+                background: isAnswer
+                  ? (wasCorrect ? "rgba(46,204,113,0.2)" : "rgba(231,76,60,0.2)")
+                  : "rgba(255,255,255,0.04)",
+                color: isAnswer ? (wasCorrect ? "#2ecc71" : "#e74c3c") : "#c8c0dc",
+                border: `1px solid ${isAnswer
+                  ? (wasCorrect ? "rgba(46,204,113,0.4)" : "rgba(231,76,60,0.4)")
+                  : "rgba(255,255,255,0.08)"}`,
+                borderRadius: 12, padding: "12px 18px", minWidth: 90,
+                fontSize: 13, fontWeight: 600, cursor: showAnswer ? "default" : "pointer",
+                fontFamily: "'DM Mono',monospace", transition: "all 0.15s",
+                opacity: showAnswer && !isAnswer ? 0.4 : 1,
+              }}>{label}</button>
+          );
+        })}
+      </div>
+
+      <button onClick={() => { clearTimeout(timerRef.current); newRound(); }}
+        style={{
+          marginTop: 14, background: "none", border: "1px solid rgba(255,255,255,0.08)",
+          color: "#5e567a", borderRadius: 20, padding: "5px 22px",
+          fontSize: 11, cursor: "pointer", fontFamily: "'DM Mono',monospace",
+        }}>skip →</button>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════
+const MODE_CONFIG = [
+  { key: "sight",    label: "🎵 Notes",    color: "#e8a838", sub: "IDENTIFY THE NOTE",      title: "Sight Reading" },
+  { key: "interval", label: "👂 Intervals", color: "#c084fc", sub: "TRAIN YOUR EAR",         title: "Interval Training" },
+  { key: "circle",   label: "🔵 Circle",   color: "#389be8", sub: "CIRCLE OF FIFTHS",        title: "Circle of Fifths" },
+  { key: "keysig",   label: "♯♭ Keys",    color: "#2ecc71", sub: "VORZEICHEN ERKENNEN",     title: "Key Signatures" },
+];
+
 export default function App() {
-  const [mode, setMode] = useState("sight"); // "sight" | "interval"
+  const [mode, setMode] = useState("sight");
+  const cfg = MODE_CONFIG.find((m) => m.key === mode) || MODE_CONFIG[0];
 
   return (
     <div style={{
@@ -787,11 +1320,9 @@ export default function App() {
       <h1 style={{
         fontFamily: "'Playfair Display',serif", fontSize: 28, fontWeight: 900,
         color: "#faf6f0", letterSpacing: "-0.5px", marginBottom: 2,
-      }}>
-        {mode === "sight" ? "Sight Reading" : "Interval Training"}
-      </h1>
+      }}>{cfg.title}</h1>
       <p style={{ color: "#5e567a", fontSize: 11, marginTop: 0, marginBottom: 14, letterSpacing: 3 }}>
-        {mode === "sight" ? "IDENTIFY THE NOTE" : "TRAIN YOUR EAR"}
+        {cfg.sub}
       </p>
 
       {/* Mode switcher */}
@@ -800,26 +1331,24 @@ export default function App() {
         background: "rgba(255,255,255,0.04)",
         borderRadius: 24, padding: 3,
         border: "1px solid rgba(255,255,255,0.06)",
+        flexWrap: "wrap", justifyContent: "center",
       }}>
-        <button onClick={() => setMode("sight")}
-          style={{
-            background: mode === "sight" ? "rgba(232,168,56,0.15)" : "transparent",
-            color: mode === "sight" ? "#e8a838" : "#5e567a",
-            border: "none", borderRadius: 20, padding: "6px 18px",
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            fontFamily: "'DM Mono',monospace", transition: "all 0.2s",
-          }}>🎵 Notes</button>
-        <button onClick={() => setMode("interval")}
-          style={{
-            background: mode === "interval" ? "rgba(200,132,252,0.15)" : "transparent",
-            color: mode === "interval" ? "#c084fc" : "#5e567a",
-            border: "none", borderRadius: 20, padding: "6px 18px",
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
-            fontFamily: "'DM Mono',monospace", transition: "all 0.2s",
-          }}>👂 Intervals</button>
+        {MODE_CONFIG.map((m) => (
+          <button key={m.key} onClick={() => setMode(m.key)}
+            style={{
+              background: mode === m.key ? `${m.color}22` : "transparent",
+              color: mode === m.key ? m.color : "#5e567a",
+              border: "none", borderRadius: 20, padding: "6px 16px",
+              fontSize: 12, fontWeight: 600, cursor: "pointer",
+              fontFamily: "'DM Mono',monospace", transition: "all 0.2s",
+            }}>{m.label}</button>
+        ))}
       </div>
 
-      {mode === "sight" ? <SightReadingMode /> : <IntervalMode />}
+      {mode === "sight"    && <SightReadingMode />}
+      {mode === "interval" && <IntervalMode />}
+      {mode === "circle"   && <CircleOfFifthsMode />}
+      {mode === "keysig"   && <KeySignatureMode />}
     </div>
   );
 }
